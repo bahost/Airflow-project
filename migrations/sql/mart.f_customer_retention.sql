@@ -14,7 +14,7 @@ create table mart.f_customer_retention(
 insert into mart.f_customer_retention (period_name,
                                         period_id,
                                         item_id,
-									    new_customers_count,
+					new_customers_count,
                                         returning_customers_count,
                                         refunded_customer_count,
                                         new_customers_revenue,
