@@ -21,19 +21,67 @@ insert into mart.f_customer_retention (new_customers_count,
                                         returning_customers_revenue,
                                         customers_refunded)
 with(
-    
-) as t
+    select 
+        s.customer_id as customer_id,
+        c.week_of_year as week_of_year,
+        s.quantity as quantity,
+        s.payment_amount as payment_amount,
+        s.item_id as item_id,
+        ---
+        count(s.id) over(partition by t.week_of_year, t.customer_id) as qty_cnt,
+    from mart.f_sales as s
+    left join mart.d_calendar as c
+        on s.date_id = c.date_id
+) as t,
+
+with(
+    select distinct
+        s.customer_id as customer_id,
+        c.week_of_year as week_of_year,
+    from mart.f_sales as s
+    left join mart.d_calendar as c
+        on s.date_id = c.date_id
+    where payment_amount < 0
+) as t2,
+
 select
-    new_customers_count,
-    returning_customers_count,
-    refunded_customer_count,
-    period_name,
-    period_id,
-    item_id,
-    new_customers_revenue,
-    returning_customers_revenue,
-    customers_refunded
-from 
+    'weekly' as period_name,
+    t.week_of_year as period_id, -- week number
+    t.item_id as item_id,
+    sum(
+        case
+            when t.qty_cnt = 1 then 1
+            else 0 
+        end) as new_customers_count,
+    sum(
+        case
+            when t.qty_cnt > 1 then 1
+            else 0 
+        end) as returning_customers_count,
+    sum(
+        case
+            when t2.customer_id is not null then 1
+            else 0
+        end) as refunded_customer_count,
+    sum(
+        case
+            when t.qty_cnt = 1 then payment_amount 
+            else 0
+        end) as new_customers_revenue,
+    sum(
+        case
+            when t2.customer_id is not null then payment_amount
+            else 0
+        end) as returning_customers_revenue,
+    count(distinct t2.customer_id) as customers_refunded
+from t
+left join t2
+on t.customer_id = t2.customer_id
+    and t.week_of_year = t2.week_of_year
+group by 
+    t.week_of_year
+    t.item_id
+;
 
 /*
 mart.f_customer_retention
