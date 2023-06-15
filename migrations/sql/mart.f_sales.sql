@@ -1,6 +1,5 @@
 -- Удаляем из факта данные за текущий день
-delete * 
-from mart.f_sales 
+delete from mart.f_sales 
 where date_id in (select date_id from mart.d_calendar where date_actual = '{{ds}}');
 
 insert into mart.f_sales (date_id, item_id, customer_id, city_id, status, quantity, payment_amount)
