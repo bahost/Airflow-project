@@ -2,6 +2,7 @@ import time
 import requests
 import json
 import pandas as pd
+import logging
 
 from datetime import datetime, timedelta
 from airflow import DAG
@@ -10,6 +11,7 @@ from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.hooks.http_hook import HttpHook
 
+task_logger = logging.getLogger("airflow.task")
 http_conn_id = HttpHook.get_connection('http_conn_id')
 api_key = http_conn_id.extra_dejson.get('api_key')
 base_url = http_conn_id.host
@@ -29,7 +31,7 @@ headers = {
 
 
 def generate_report(ti):
-    print('Making request generate_report')
+    task_logger.info("Making request generate_report")
 
     response = requests.post(f'{base_url}/generate_report', headers=headers)
     response.raise_for_status()
@@ -39,7 +41,8 @@ def generate_report(ti):
 
 
 def get_report(ti):
-    print('Making request get_report')
+    task_logger.info("Making request get_report")
+
     task_id = ti.xcom_pull(key='task_id')
 
     report_id = None
@@ -62,7 +65,8 @@ def get_report(ti):
 
 
 def get_increment(date, ti):
-    print('Making request get_increment')
+    task_logger.info("Making request get_increment")
+
     report_id = ti.xcom_pull(key='report_id')
     response = requests.get(
         f'{base_url}/get_increment?report_id={report_id}&date={str(date)}T00:00:00',
@@ -98,8 +102,9 @@ def upload_data_to_staging(filename, date, pg_table, pg_schema, ti):
 
     postgres_hook = PostgresHook(postgres_conn_id)
     engine = postgres_hook.get_sqlalchemy_engine()
+    postgres_hook.run(sql=f"DELETE FROM {pg_schema}.{pg_table};") 
     row_count = df.to_sql(pg_table, engine, schema=pg_schema, if_exists='append', index=False)
-    print(f'{row_count} rows was inserted')
+    task_logger.info(f'{row_count} rows was inserted')
 
 
 args = {
@@ -107,7 +112,7 @@ args = {
     'email': ['student@example.com'],
     'email_on_failure': False,
     'email_on_retry': False,
-    'retries': 0
+    'retries': 3
 }
 
 business_dt = '{{ ds }}'
@@ -119,6 +124,7 @@ with DAG(
         catchup=True,
         start_date=datetime.today() - timedelta(days=7),
         end_date=datetime.today() - timedelta(days=1),
+        max_active_runs=1,
 ) as dag:
     generate_report = PythonOperator(
         task_id='generate_report',
@@ -163,6 +169,13 @@ with DAG(
         parameters={"date": {business_dt}}
     )
 
+    update_dm_customer_retention = PostgresOperator(
+        task_id='update_dm_customer_retention',
+        postgres_conn_id=postgres_conn_id,
+        sql="sql/mart.f_customer_retention.sql",
+        parameters={"date": {business_dt}}
+    )
+
     (
             generate_report
             >> get_report
@@ -170,5 +183,5 @@ with DAG(
             >> upload_user_order_inc
             >> [update_d_item_table, update_d_city_table, update_d_customer_table]
             >> update_f_sales
+            >> update_dm_customer_retention
     )
-
